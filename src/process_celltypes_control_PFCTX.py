@@ -47,6 +47,12 @@ asap.process_clusters(mode = "merged", outdir = merged_pipeline_dir, groups = {"
 # In case you had already run process_clusters and just want to register the clusters - comment the line above, uncomment the line below
 # asap.set_merge_clusters(outdir_merged_clusters = "../3_combinedUMAP_perCelltype/clusterPipeline/merged_cluster/", groups = {"PFCTX_Ctl" : ["DA478", "DA480", "DA488", "Seq127_1"]})
 
+# Write tsv files with barcodes per cell type (so that we later on can check how many cells there are per group)
+for celltype, cluster in asap.merge_samples_groups["PFCTX_Ctl"].items():
+    with open(os.path.join(merged_dir, (cluster.cluster_name + ".tsv")), 'w') as of:
+        for tsv in cluster.tsv:
+            with open(tsv) as tsv_fin:
+                of.write(tsv_fin.read())
 
 
 
