@@ -1,0 +1,107 @@
+---
+title: "Cell type classification for 5' snRNAseq"
+output: html_notebook
+---
+
+
+## Load data
+```{r}
+library(ggplot2)
+library(Seurat)
+library(stringr)
+library(data.table)
+
+asap <- readRDS("/Volumes/MyPassport/ASAP_Ctl_PD_5prime/3_combinedUMAP_perCluster/asap_5prime.rds")
+tmp <- data.frame(sample = asap$orig.ident)
+tmp$condition <- ifelse(tmp$sample %in% c("DA475", "DA489", "Seq127_2", "Seq127_4"), "SN_PD",
+                        ifelse(tmp$sample %in% c("DA476", "DA490", "Seq127_3", "Seq127_5"), "PFCTX_PD",
+                               ifelse(tmp$sample %in% c("DA478", "DA480", "DA488", "Seq127_1"), "PFCTX_Ctl",
+                                      ifelse(tmp$sample %in% c("Seq127_6", "DA477", "DA479", "DA487"), "SN_Ctl", NA))))
+asap <- AddMetaData(asap, col.name = "condition", metadata = tmp[,"condition",drop=F])
+asap <- subset(asap, condition == "PFCTX_Ctl")
+
+DimPlot(asap)
+FeaturePlot(asap, c("nCount_RNA", "nFeature_RNA"), split.by = "condition", keep.scale = "feature")
+```
+
+## Markers for cell type classification
+
+Added condition to metadata and checked biomarkers
+```{r}
+
+# Markers
+neuronal <- c("MAP2", "DCX")
+excitatory <- c("RBFOX3", "GRIN1", "HS3ST2")
+inhibitory <- c("GAD1", "GAD2", "CALB2", "CNR1")
+astrocyte <- c("GFAP", "AQP4", "GJA1", "SLC1A3")
+oligodendrocyte <- c("PLP1", "MOG", "MBP")
+opc <- c("COL9A1", "VCAN", "PDGFRA")
+microglia <- c("P2RY12", "FYB1")
+
+markers <- unique(c(neuronal,
+             excitatory,
+             inhibitory,
+             astrocyte,
+             oligodendrocyte,
+             opc,
+             microglia))
+
+DotPlot(asap, features = markers, group.by = "cellType", scale = F) + theme(axis.text.x = element_text(angle=90, hjust=1)) 
+
+FeaturePlot(asap, features = c(excitatory[1], inhibitory[1], astrocyte[1], oligodendrocyte[1], opc[2], microglia[2]), ncol = 3)
+```
+
+## Cell type classification
+
+Added to metadata
+
+```{r}
+coldata_celltypes <- reshape2::melt(list("Excitatory neurons" = as.character(c(3,4,11,13)),
+                         "OPC" = as.character(c(8,10)),
+                         "Oligodendrocytes" = as.character(c(0,1,2)),
+                         "Astrocytes" = as.character(c(5,6,12)),
+                         "Inhibitory neurons" = as.character(c(7,14,15)),
+                         "Microglia" = as.character(c(9,16))))
+
+colnames(coldata_celltypes) <- c("cluster", "cellType")
+# Cell type colours
+library(RColorBrewer)
+cellType_colours <- colorRampPalette(brewer.pal(7, "Spectral"))(6)
+names(cellType_colours) <- c("Excitatory neurons", "OPC", 
+                             "Astrocytes", "Inhibitory neurons", 
+                             "Oligodendrocytes", "Microglia")
+cellType_colours <- data.frame("colour" = cellType_colours)
+cellType_colours$cellType <- rownames(cellType_colours)
+
+coldata_celltypes <- merge(coldata_celltypes, cellType_colours, by="cellType")
+# Add cell type to Seurat metadata
+tmp <- data.frame(cluster = asap$seurat_clusters)
+tmp$cellId <- rownames(tmp) 
+tmp <- merge(tmp, coldata_celltypes)
+rownames(tmp) <- tmp$cellId
+asap <- AddMetaData(asap, col.name = "cellType", metadata = tmp[,"cellType",drop=F])
+
+cellType_colours_vector <- cellType_colours[,"colour", ]
+names(cellType_colours_vector) <- cellType_colours$cellType
+
+DimPlot(asap, group.by = "cellType", label.box = T, label = T, cols = cellType_colours_vector)
+```
+
+## Write barcodes to tsv files
+```{r}
+celltype_barcodes <- FetchData(asap, c("cellType", "orig.ident"))
+celltype_barcodes$barcode <- rownames(celltype_barcodes)
+celltype_barcodes$cellType_sample <- paste(celltype_barcodes$orig.ident, "merged.clusters", celltype_barcodes$cellType, sep = "_")
+celltype_barcodes_per_sample <- split(celltype_barcodes, f = celltype_barcodes$cellType_sample)
+
+split_barcode <- function(x){
+  return(sapply(str_split(x$barcode, paste(unique(x$orig.ident), "_", sep="")), `[[`, 2))
+}
+celltype_barcodes_per_sample_per_celltype <- sapply(celltype_barcodes_per_sample, FUN = split_barcode)
+
+for(i in names(celltype_barcodes_per_sample_per_celltype)){
+  name <- str_replace(i, " ", "")
+  fwrite(celltype_barcodes_per_sample_per_celltype[i], paste("/Volumes/MyPassport/ASAP_Ctl_PD_5prime/3_combinedUMAP_perCelltype/", name, ".tsv", sep=""), quote=F, row.names=F, col.names=F)
+}
+
+```
